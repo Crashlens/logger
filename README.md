@@ -57,6 +57,52 @@ python -m crashlens_logger.logger log \
   --config "custom_pricing.yaml"
 ```
 
+### Python Integration Example
+
+You can use CrashLensLogger directly in your Python code to log structured events:
+
+```python
+from crashlens_logger import CrashLensLogger
+
+logger = CrashLensLogger()
+
+logger.log_event(
+    traceId="trace_3921",
+    type="generation",
+    startTime="2024-06-01T10:00:00Z",
+    endTime="2024-06-01T10:00:01Z",
+    level="info",
+    input={"model": "gpt-4o", "prompt": "What is 2+2?"},
+    usage={"prompt_tokens": 5, "completion_tokens": 5},
+    cost=0.000162,
+    metadata={"fallback_attempted": False, "route": "/api/chat/completions", "team": "engineering"},
+    name="simple-retry"
+)
+```
+
+#### Required Fields for Structured Logging
+
+| Field      | Description                                  | Example Value                        |
+|------------|----------------------------------------------|--------------------------------------|
+| traceId    | Unique request ID (UUID)                     | "trace_3921"                         |
+| type       | Log type                                     | "generation"                         |
+| startTime  | Start timestamp (ISO8601)                    | "2024-06-01T10:00:00Z"               |
+| endTime    | End timestamp (ISO8601)                      | "2024-06-01T10:00:01Z"               |
+| level      | Log level                                    | "info"                               |
+| input      | Dict: model, prompt, etc.                    | {"model": "gpt-4o", "prompt": "..."} |
+| usage      | Dict: token counts, etc.                     | {"prompt_tokens": 5, ...}            |
+| cost       | Operation cost                               | 0.000162                             |
+| metadata   | Dict: extra info (route, team, etc.)         | {"route": "...", "team": "..."}      |
+| name       | Operation name                               | "simple-retry"                       |
+
+#### Step-by-Step: Logging in Your AI Agent
+
+1. Install: `pip install crashlens_logger`
+2. Import: `from crashlens_logger import CrashLensLogger`
+3. Initialize: `logger = CrashLensLogger()`
+4. Collect required fields (see table above)
+5. Log: `logger.log_event(traceId=..., type=..., ...)`
+
 ### Configuration Management
 
 Initialize a sample configuration file:
@@ -79,17 +125,16 @@ Each log entry follows this JSON schema:
 
 ```json
 {
-  "trace_id": "123e4567-e89b-12d3-a456-426614174000",
-  "timestamp": "2025-07-23T10:30:00.000Z",
-  "model": "gpt-4",
-  "prompt": "Hello, world!",
-  "response": "Hi there!",
-  "input_tokens": 3,
-  "output_tokens": 3,
-  "cost": 0.00018,
-  "latency_ms": 1250,
-  "retry_count": 0,
-  "fallback_model": null
+  "traceId": "trace_3921",
+  "type": "generation",
+  "startTime": "2024-06-01T10:00:00Z",
+  "endTime": "2024-06-01T10:00:01Z",
+  "level": "info",
+  "input": {"model": "gpt-4o", "prompt": "What is 2+2?"},
+  "usage": {"prompt_tokens": 5, "completion_tokens": 5},
+  "cost": 0.000162,
+  "metadata": {"fallback_attempted": false, "route": "/api/chat/completions", "team": "engineering"},
+  "name": "simple-retry"
 }
 ```
 

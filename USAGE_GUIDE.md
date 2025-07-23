@@ -136,6 +136,26 @@ crashlens-logger log --model "gpt-4" --prompt "Query 3" --response "Response 3"
 crashlens-logger analyze logs.jsonl
 ```
 
+### Example 5: Python Integration
+```python
+from crashlens_logger import CrashLensLogger
+
+logger = CrashLensLogger()
+
+logger.log_event(
+    traceId="trace_3921",
+    type="generation",
+    startTime="2024-06-01T10:00:00Z",
+    endTime="2024-06-01T10:00:01Z",
+    level="info",
+    input={"model": "gpt-4o", "prompt": "What is 2+2?"},
+    usage={"prompt_tokens": 5, "completion_tokens": 5},
+    cost=0.000162,
+    metadata={"fallback_attempted": False, "route": "/api/chat/completions", "team": "engineering"},
+    name="simple-retry"
+)
+```
+
 ## Command Options Reference
 
 ### `log` command:
