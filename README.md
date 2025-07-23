@@ -13,16 +13,50 @@ A CLI tool for generating structured logs of LLM API usage. These logs are desig
 🔹 **YAML Configuration** - Flexible pricing configuration  
 🔹 **Dev Mode** - Verbose output and debugging features  
 
-## Installation
+## Setup & Installation
+
+### 1. Recommended: Install from PyPI
+
+```bash
+pip install crashlens_logger
+```
+
+### 2. Development Installation (Editable Mode)
+If you want to work on the code and see changes reflected immediately:
+
+```bash
+# (Optional but recommended) Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install in editable mode
+pip install -e .
+```
+
+### 3. Install Directly from GitHub (if applicable)
+If the package is hosted on GitHub:
+
+```bash
+pip install git+https://github.com/Crashlens/logger.git
+```
+
+### 4. Install Dependencies Manually (if needed)
+If you want to install dependencies directly:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-For development installation:
-```bash
-pip install -e .
-```
+### 5. Troubleshooting
+- **Cannot resolve host (e.g., github.com):**
+  - Check your internet connection.
+  - Try opening https://github.com in your browser.
+  - Try changing your DNS to Google (8.8.8.8) or Cloudflare (1.1.1.1).
+  - If on a restricted network, check firewall/proxy settings.
+- **pip cache issues:**
+  - Try `pip install --no-cache-dir crashlens_logger`
+- **Permission errors:**
+  - Use a virtual environment or add `--user` to your pip command.
 
 ## Usage
 
