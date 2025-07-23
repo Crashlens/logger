@@ -1,0 +1,39 @@
+# Sample configuration for CrashLens Logger
+# Edit this file to customize model pricing
+
+pricing:
+  # OpenAI Models
+  gpt-4:
+    input_price_per_1k: 0.03
+    output_price_per_1k: 0.06
+  
+  gpt-4-turbo:
+    input_price_per_1k: 0.01
+    output_price_per_1k: 0.03
+  
+  gpt-3.5-turbo:
+    input_price_per_1k: 0.001
+    output_price_per_1k: 0.002
+  
+  # Anthropic Models
+  claude-3-opus:
+    input_price_per_1k: 0.015
+    output_price_per_1k: 0.075
+  
+  claude-3-sonnet:
+    input_price_per_1k: 0.003
+    output_price_per_1k: 0.015
+  
+  claude-3-haiku:
+    input_price_per_1k: 0.00025
+    output_price_per_1k: 0.00125
+  
+  # Google Models
+  gemini-pro:
+    input_price_per_1k: 0.001
+    output_price_per_1k: 0.002
+  
+  # Custom models (add your own)
+  # custom-model:
+  #   input_price_per_1k: 0.005
+  #   output_price_per_1k: 0.010

@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""
+CrashLens Logger - CLI tool for generating structured logs of LLM API usage.
+Used by FinOps tools to detect token waste, fallback storms, retry loops, and enforce budget policies.
+"""
+
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Any
+
+import click
+import orjson
+import yaml
+
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich import print as rprint
+    RICH_AVAILABLE = True
+    console = Console()
+except ImportError:
+    RICH_AVAILABLE = False
+    # Fallback console for when rich is not available
+    class Console:
+        def print(self, *args, **kwargs):
+            print(*args)
+    
+    def rprint(*args, **kwargs):
+        print(*args)
+    
+    console = Console()
+    
+    # Simple fallback table for when rich is not available
+    class Table:
+        def __init__(self, title=""):
+            self.title = title
+            self.columns = []
+            self.rows = []
+        
+        def add_column(self, name, **kwargs):
+            self.columns.append(name)
+        
+        def add_row(self, *values):
+            self.rows.append(values)
+        
+        def __str__(self):
+            if not self.rows:
+                return f"{self.title}\nNo data"
+            
+            result = f"{self.title}\n"
+            result += " | ".join(self.columns) + "\n"
+            result += "-" * (len(" | ".join(self.columns))) + "\n"
+            for row in self.rows:
+                result += " | ".join(str(cell) for cell in row) + "\n"
+            return result
+
+
+class LogEvent:
+    """Represents a single log event with all required fields."""
+    
+    def __init__(
+        self,
+        trace_id: str,
+        model: str,
+        prompt: str,
+        response: str = "",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost: float = 0.0,
+        latency_ms: int = 0,
+        retry_count: int = 0,
+        fallback_model: Optional[str] = None
+    ):
+        self.trace_id = trace_id
+        self.timestamp = datetime.utcnow().isoformat() + "Z"
+        self.model = model
+        self.prompt = prompt
+        self.response = response
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cost = cost
+        self.latency_ms = latency_ms
+        self.retry_count = retry_count
+        self.fallback_model = fallback_model
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert log event to dictionary for JSON serialization."""
+        return {
+            "trace_id": self.trace_id,
+            "timestamp": self.timestamp,
+            "model": self.model,
+            "prompt": self.prompt,
+            "response": self.response,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cost": self.cost,
+            "latency_ms": self.latency_ms,
+            "retry_count": self.retry_count,
+            "fallback_model": self.fallback_model
+        }
+    
+    def to_json(self) -> str:
+        """Convert log event to JSON string using orjson for fast serialization."""
+        return orjson.dumps(self.to_dict()).decode('utf-8')
+
+
+class TokenEstimator:
+    """Handles token estimation logic."""
+    
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        """
+        Estimate tokens from text using word count approximation.
+        TODO: Replace with tiktoken or Claude tokenizer for accurate counts.
+        """
+        if not text:
+            return 0
+        
+        # Rough approximation: 1 token ≈ 0.75 words
+        word_count = len(text.split())
+        return int(word_count / 0.75)
+
+
+class CostCalculator:
+    """Handles cost calculation based on model pricing."""
+    
+    def __init__(self, pricing_config: Dict[str, Dict[str, float]]):
+        self.pricing = pricing_config
+    
+    def calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        """Calculate cost based on token usage and model pricing."""
+        if model not in self.pricing:
+            console.print(f"[yellow]Warning: No pricing data for model '{model}', using default[/yellow]")
+            # Default pricing fallback
+            input_price = 0.001  # $0.001 per 1K tokens
+            output_price = 0.002  # $0.002 per 1K tokens
+        else:
+            input_price = self.pricing[model].get("input_price_per_1k", 0.001)
+            output_price = self.pricing[model].get("output_price_per_1k", 0.002)
+        
+        input_cost = (input_tokens * input_price) / 1000
+        output_cost = (output_tokens * output_price) / 1000
+        
+        return round(input_cost + output_cost, 6)
+
+
+class ConfigManager:
+    """Handles YAML configuration loading and parsing."""
+    
+    DEFAULT_PRICING = {
+        "gpt-4": {
+            "input_price_per_1k": 0.03,
+            "output_price_per_1k": 0.06
+        },
+        "gpt-3.5-turbo": {
+            "input_price_per_1k": 0.001,
+            "output_price_per_1k": 0.002
+        },
+        "claude-3-opus": {
+            "input_price_per_1k": 0.015,
+            "output_price_per_1k": 0.075
+        },
+        "claude-3-sonnet": {
+            "input_price_per_1k": 0.003,
+            "output_price_per_1k": 0.015
+        }
+    }
+    
+    @classmethod
+    def load_config(cls, config_path: Optional[str] = None) -> Dict[str, Dict[str, float]]:
+        """Load pricing configuration from YAML file or use defaults."""
+        if config_path and Path(config_path).exists():
+            try:
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                console.print(f"[green]Loaded config from {config_path}[/green]")
+                return config.get("pricing", cls.DEFAULT_PRICING)
+            except Exception as e:
+                console.print(f"[red]Error loading config: {e}[/red]")
+                console.print("[yellow]Falling back to default pricing[/yellow]")
+        
+        return cls.DEFAULT_PRICING
+
+
+class CrashLensLogger:
+    """Main logger class that orchestrates all components."""
+    
+    def __init__(self, config_path: Optional[str] = None, dev_mode: bool = False):
+        self.pricing_config = ConfigManager.load_config(config_path)
+        self.cost_calculator = CostCalculator(self.pricing_config)
+        self.token_estimator = TokenEstimator()
+        self.dev_mode = dev_mode
+        
+        if dev_mode:
+            console.print("[cyan]🚀 Dev Mode Enabled[/cyan]")
+    
+    def generate_log_event(
+        self,
+        model: str,
+        prompt: str,
+        response: str = "",
+        trace_id: Optional[str] = None,
+        retry_count: int = 0,
+        fallback_model: Optional[str] = None,
+        simulate_latency: bool = True
+    ) -> LogEvent:
+        """Generate a single log event with calculated metrics."""
+        
+        if trace_id is None:
+            trace_id = str(uuid.uuid4())
+        
+        # Estimate tokens
+        input_tokens = self.token_estimator.estimate_tokens(prompt)
+        output_tokens = self.token_estimator.estimate_tokens(response)
+        
+        # Calculate cost
+        cost = self.cost_calculator.calculate_cost(model, input_tokens, output_tokens)
+        
+        # Simulate latency (for demo purposes)
+        latency_ms = 0
+        if simulate_latency:
+            import random
+            latency_ms = random.randint(100, 2000)  # 100ms to 2s
+        
+        return LogEvent(
+            trace_id=trace_id,
+            model=model,
+            prompt=prompt,
+            response=response,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost,
+            latency_ms=latency_ms,
+            retry_count=retry_count,
+            fallback_model=fallback_model
+        )
+    
+    def write_logs(self, events: List[LogEvent], output_path: str) -> None:
+        """Write log events to JSONL file."""
+        try:
+            with open(output_path, 'a') as f:
+                for event in events:
+                    f.write(event.to_json() + '\n')
+            
+            console.print(f"[green]✅ Logged {len(events)} events to {output_path}[/green]")
+            
+            if self.dev_mode:
+                self._print_events_table(events)
+                
+        except Exception as e:
+            console.print(f"[red]❌ Error writing logs: {e}[/red]")
+            raise
+    
+    def _print_events_table(self, events: List[LogEvent]) -> None:
+        """Print events in a nice table format for dev mode."""
+        table = Table(title="Generated Log Events")
+        
+        table.add_column("Trace ID", style="cyan" if RICH_AVAILABLE else "", no_wrap=True)
+        table.add_column("Model", style="magenta" if RICH_AVAILABLE else "")
+        table.add_column("Tokens (I/O)", style="green" if RICH_AVAILABLE else "")
+        table.add_column("Cost", style="yellow" if RICH_AVAILABLE else "")
+        table.add_column("Latency", style="blue" if RICH_AVAILABLE else "")
+        table.add_column("Retry", style="red" if RICH_AVAILABLE else "")
+        
+        for event in events:
+            table.add_row(
+                event.trace_id[:8] + "...",
+                event.model,
+                f"{event.input_tokens}/{event.output_tokens}",
+                f"${event.cost:.4f}",
+                f"{event.latency_ms}ms",
+                str(event.retry_count) if event.retry_count > 0 else "-"
+            )
+        
+        if RICH_AVAILABLE:
+            console.print(table)
+        else:
+            print(table)
+
+
+# CLI Commands
+@click.group()
+@click.version_option(version="1.0.0", prog_name="crashlens-logger")
+def cli():
+    """CrashLens Logger - Generate structured logs for LLM API usage tracking."""
+    pass
+
+
+@cli.command()
+@click.option("--model", required=True, help="LLM model name (e.g., gpt-4, claude-3-opus)")
+@click.option("--prompt", required=True, help="Input prompt text")
+@click.option("--response", default="", help="Model response text")
+@click.option("--output", default="logs.jsonl", help="Output file path")
+@click.option("--simulate-retries", type=int, help="Number of retry attempts to simulate")
+@click.option("--simulate-fallback", is_flag=True, help="Simulate fallback to different model")
+@click.option("--trace-id", help="Custom trace ID (UUID format)")
+@click.option("--dev-mode", is_flag=True, help="Enable development mode with verbose output")
+@click.option("--config", help="Path to YAML config file for model pricing")
+def log(
+    model: str,
+    prompt: str,
+    response: str,
+    output: str,
+    simulate_retries: Optional[int],
+    simulate_fallback: bool,
+    trace_id: Optional[str],
+    dev_mode: bool,
+    config: Optional[str]
+):
+    """Generate structured log entries for LLM API usage."""
+    
+    # Initialize logger
+    logger = CrashLensLogger(config_path=config, dev_mode=dev_mode)
+    
+    # Validate trace_id if provided
+    if trace_id:
+        try:
+            uuid.UUID(trace_id)
+        except ValueError:
+            console.print(f"[red]❌ Invalid trace-id format. Expected UUID, got: {trace_id}[/red]")
+            raise click.Abort()
+    
+    events = []
+    
+    # Handle dev mode defaults
+    if dev_mode and not response:
+        response = f"This is a simulated response for the prompt: '{prompt[:50]}...'"
+        console.print(f"[cyan]🔧 Dev Mode: Using simulated response[/cyan]")
+    
+    # Generate base trace ID
+    base_trace_id = trace_id or str(uuid.uuid4())
+    
+    # Handle retry simulation
+    if simulate_retries:
+        console.print(f"[yellow]🔄 Simulating {simulate_retries} retries[/yellow]")
+        
+        # Generate failed retry attempts
+        for retry_num in range(1, simulate_retries + 1):
+            retry_event = logger.generate_log_event(
+                model=model,
+                prompt=prompt,
+                response="",  # Failed attempts have no response
+                trace_id=base_trace_id,
+                retry_count=retry_num
+            )
+            events.append(retry_event)
+        
+        # Final successful attempt
+        success_event = logger.generate_log_event(
+            model=model,
+            prompt=prompt,
+            response=response,
+            trace_id=base_trace_id,
+            retry_count=simulate_retries + 1
+        )
+        events.append(success_event)
+    
+    # Handle fallback simulation
+    elif simulate_fallback:
+        console.print("[yellow]🔀 Simulating model fallback[/yellow]")
+        
+        # Failed attempt with primary model
+        failed_event = logger.generate_log_event(
+            model=model,
+            prompt=prompt,
+            response="",  # Failed attempt
+            trace_id=base_trace_id,
+            retry_count=1
+        )
+        events.append(failed_event)
+        
+        # Successful attempt with fallback model
+        fallback_model = "gpt-3.5-turbo" if model != "gpt-3.5-turbo" else "gpt-4"
+        success_event = logger.generate_log_event(
+            model=fallback_model,
+            prompt=prompt,
+            response=response or f"Fallback response from {fallback_model}",
+            trace_id=base_trace_id,
+            retry_count=2,
+            fallback_model=fallback_model
+        )
+        events.append(success_event)
+    
+    # Normal single log event
+    else:
+        event = logger.generate_log_event(
+            model=model,
+            prompt=prompt,
+            response=response,
+            trace_id=base_trace_id
+        )
+        events.append(event)
+    
+    # Write logs to file
+    logger.write_logs(events, output)
+
+
+@cli.command()
+@click.option("--config", help="Path to config file to create")
+def init_config(config: Optional[str]):
+    """Initialize a sample configuration file."""
+    config_path = config or "crashlens_config.yaml"
+    
+    sample_config = {
+        "pricing": {
+            "gpt-4": {
+                "input_price_per_1k": 0.03,
+                "output_price_per_1k": 0.06
+            },
+            "gpt-3.5-turbo": {
+                "input_price_per_1k": 0.001,
+                "output_price_per_1k": 0.002
+            },
+            "claude-3-opus": {
+                "input_price_per_1k": 0.015,
+                "output_price_per_1k": 0.075
+            },
+            "claude-3-sonnet": {
+                "input_price_per_1k": 0.003,
+                "output_price_per_1k": 0.015
+            }
+        }
+    }
+    
+    try:
+        with open(config_path, 'w') as f:
+            yaml.dump(sample_config, f, default_flow_style=False, indent=2)
+        
+        console.print(f"[green]✅ Created sample config at {config_path}[/green]")
+        console.print(f"[cyan]Edit this file to customize model pricing[/cyan]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error creating config: {e}[/red]")
+        raise click.Abort()
+
+
+@cli.command()
+@click.argument("log_file", type=click.Path(exists=True))
+@click.option("--trace-id", help="Filter by specific trace ID")
+@click.option("--model", help="Filter by model name")
+def analyze(log_file: str, trace_id: Optional[str], model: Optional[str]):
+    """Analyze existing log files and show statistics."""
+    try:
+        events = []
+        with open(log_file, 'r') as f:
+            for line in f:
+                if line.strip():
+                    event_data = orjson.loads(line)
+                    events.append(event_data)
+        
+        # Apply filters
+        if trace_id:
+            events = [e for e in events if e.get("trace_id") == trace_id]
+        
+        if model:
+            events = [e for e in events if e.get("model") == model]
+        
+        if not events:
+            console.print("[yellow]No events found matching criteria[/yellow]")
+            return
+        
+        # Calculate statistics
+        total_cost = sum(e.get("cost", 0) for e in events)
+        total_input_tokens = sum(e.get("input_tokens", 0) for e in events)
+        total_output_tokens = sum(e.get("output_tokens", 0) for e in events)
+        avg_latency = sum(e.get("latency_ms", 0) for e in events) / len(events)
+        
+        # Print analysis
+        table = Table(title=f"Log Analysis: {log_file}")
+        table.add_column("Metric", style="cyan" if RICH_AVAILABLE else "")
+        table.add_column("Value", style="green" if RICH_AVAILABLE else "")
+        
+        table.add_row("Total Events", str(len(events)))
+        table.add_row("Total Cost", f"${total_cost:.4f}")
+        table.add_row("Total Input Tokens", f"{total_input_tokens:,}")
+        table.add_row("Total Output Tokens", f"{total_output_tokens:,}")
+        table.add_row("Average Latency", f"{avg_latency:.1f}ms")
+        
+        if RICH_AVAILABLE:
+            console.print(table)
+        else:
+            print(table)
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error analyzing log file: {e}[/red]")
+        raise click.Abort()
+
+
+def main():
+    """Main entry point for the CLI application."""
+    cli()
+
+
+if __name__ == "__main__":
+    main()
