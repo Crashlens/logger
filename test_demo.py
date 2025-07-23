@@ -92,5 +92,24 @@ def main():
             print(f"  ❌ {file} (not found)")
     print(f"{'='*60}")
 
+def python_logger_demo():
+    """Demonstrate direct Python usage of CrashLensLogger for structured logging."""
+    from crashlens_logger import CrashLensLogger
+    logger = CrashLensLogger()
+    logger.log_event(
+        traceId="trace_3921",
+        type="generation",
+        startTime="2024-06-01T10:00:00Z",
+        endTime="2024-06-01T10:00:01Z",
+        level="info",
+        input={"model": "gpt-4o", "prompt": "What is 2+2?"},
+        usage={"prompt_tokens": 5, "completion_tokens": 5},
+        cost=0.000162,
+        metadata={"fallback_attempted": False, "route": "/api/chat/completions", "team": "engineering"},
+        name="simple-retry"
+    )
+
 if __name__ == "__main__":
     main()
+    print("\n--- Python Logger Demo ---")
+    python_logger_demo()

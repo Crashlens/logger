@@ -72,62 +72,103 @@ console = Console()
 
 
 class LogEvent:
-    """Represents a single log event with all required fields."""
+    """Represents a single log event with all required fields and supports arbitrary extra fields."""
     
     def __init__(
         self,
-        trace_id: str,
-        model: str,
-        prompt: str,
-        response: str = "",
-        input_tokens: int = 0,
-        output_tokens: int = 0,
-        cost: float = 0.0,
-        latency_ms: int = 0,
-        retry_count: int = 0,
-        fallback_model: Optional[str] = None
+        trace_id: str = None,
+        type: str = None,
+        start_time: str = None,
+        end_time: str = None,
+        level: str = None,
+        input: dict = None,
+        usage: dict = None,
+        cost: float = None,
+        metadata: dict = None,
+        name: str = None,
+        # legacy fields for backward compatibility
+        model: str = None,
+        prompt: str = None,
+        response: str = None,
+        input_tokens: int = None,
+        output_tokens: int = None,
+        latency_ms: int = None,
+        retry_count: int = None,
+        fallback_model: str = None,
+        **extra_fields
     ):
-        self.trace_id = trace_id
-        self.type = "generation"
-        self.start_time = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        # Standard fields
+        self.traceId = trace_id or extra_fields.pop("traceId", None)
+        self.type = type or extra_fields.pop("type", None)
+        self.startTime = start_time or extra_fields.pop("startTime", None)
+        self.endTime = end_time or extra_fields.pop("endTime", None)
+        self.level = level or extra_fields.pop("level", None)
+        self.input = input or extra_fields.pop("input", None)
+        self.usage = usage or extra_fields.pop("usage", None)
+        self.cost = cost if cost is not None else extra_fields.pop("cost", None)
+        self.metadata = metadata or extra_fields.pop("metadata", None)
+        self.name = name or extra_fields.pop("name", None)
+        # Legacy/compat fields
         self.model = model
         self.prompt = prompt
         self.response = response
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
-        self.total_tokens = input_tokens + output_tokens
-        self.cost = cost
         self.latency_ms = latency_ms
         self.retry_count = retry_count
-        self.retry_attempt = retry_count
         self.fallback_model = fallback_model
-    
+        # Store any extra fields
+        self.extra_fields = extra_fields
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert log event to dictionary for JSON serialization."""
-        return {
-            "traceId": self.trace_id,
-            "type": self.type,
-            "startTime": self.start_time,
-            "input": {
-                "model": self.model,
-                "prompt": self.prompt
-            },
-            "output": {
-                "response": self.response
-            },
-            "usage": {
-                "prompt_tokens": self.input_tokens,
-                "completion_tokens": self.output_tokens,
-                "total_tokens": self.total_tokens
-            },
-            "cost": self.cost,
-            "latency_ms": self.latency_ms,
-            "retry_attempt": self.retry_attempt,
-            "fallback_model": self.fallback_model
-        }
-    
+        d = {}
+        # Add standard fields if present
+        if self.traceId is not None:
+            d["traceId"] = self.traceId
+        if self.type is not None:
+            d["type"] = self.type
+        if self.startTime is not None:
+            d["startTime"] = self.startTime
+        if self.endTime is not None:
+            d["endTime"] = self.endTime
+        if self.level is not None:
+            d["level"] = self.level
+        if self.input is not None:
+            d["input"] = self.input
+        if self.usage is not None:
+            d["usage"] = self.usage
+        if self.cost is not None:
+            d["cost"] = self.cost
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
+        if self.name is not None:
+            d["name"] = self.name
+        # Add legacy fields if present and not already included
+        if self.model and (not self.input or "model" not in self.input):
+            d.setdefault("input", {})["model"] = self.model
+        if self.prompt and (not self.input or "prompt" not in self.input):
+            d.setdefault("input", {})["prompt"] = self.prompt
+        if self.response:
+            d.setdefault("output", {})["response"] = self.response
+        if self.input_tokens is not None or self.output_tokens is not None:
+            d.setdefault("usage", {})
+            if self.input_tokens is not None:
+                d["usage"]["prompt_tokens"] = self.input_tokens
+            if self.output_tokens is not None:
+                d["usage"]["completion_tokens"] = self.output_tokens
+            if self.input_tokens is not None and self.output_tokens is not None:
+                d["usage"]["total_tokens"] = self.input_tokens + self.output_tokens
+        if self.latency_ms is not None:
+            d["latency_ms"] = self.latency_ms
+        if self.retry_count is not None:
+            d["retry_count"] = self.retry_count
+        if self.fallback_model is not None:
+            d["fallback_model"] = self.fallback_model
+        # Merge in any extra fields
+        d.update(self.extra_fields)
+        return d
+
     def to_json(self) -> str:
-        """Convert log event to JSON string using orjson for fast serialization."""
         return orjson.dumps(self.to_dict()).decode('utf-8')
 
 
@@ -311,6 +352,12 @@ class CrashLensLogger:
             console.print(table)
         else:
             print(table)
+
+    def log_event(self, **fields):
+        """Log a structured event with arbitrary fields (prints JSON to stdout)."""
+        event = LogEvent(**fields)
+        print(event.to_json())
+        return event
 
 
 # CLI Commands
