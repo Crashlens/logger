@@ -18,7 +18,7 @@ A CLI tool for generating structured logs of LLM API usage. These logs are desig
 ### 1. Recommended: Install from PyPI
 
 ```bash
-pip install crashlens_logger
+pip install --upgrade crashlens_logger
 ```
 
 ### 2. Development Installation (Editable Mode)
