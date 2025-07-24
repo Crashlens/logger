@@ -120,6 +120,31 @@ class LogEvent:
         # Store any extra fields
         self.extra_fields = extra_fields
 
+    def _auto_usage(self):
+        # Calculate total_tokens if possible
+        usage = self.usage.copy() if self.usage else {}
+        pt = usage.get("prompt_tokens")
+        ct = usage.get("completion_tokens")
+        if pt is not None and ct is not None:
+            usage["total_tokens"] = pt + ct
+        return usage
+
+    def _auto_cost(self, model, usage, cost):
+        # If cost is provided, use it. Otherwise, calculate if possible.
+        if cost is not None:
+            return cost
+        # Try to calculate cost if model and usage are available
+        if model and usage:
+            pt = usage.get("prompt_tokens")
+            ct = usage.get("completion_tokens")
+            if pt is not None and ct is not None:
+                # Use default pricing if available
+                from .logger import ConfigManager, CostCalculator
+                pricing = ConfigManager.DEFAULT_PRICING
+                calc = CostCalculator(pricing)
+                return calc.calculate_cost(model, pt, ct)
+        return None
+
     def to_dict(self) -> Dict[str, Any]:
         d = {}
         # Add standard fields if present
@@ -135,10 +160,13 @@ class LogEvent:
             d["level"] = self.level
         if self.input is not None:
             d["input"] = self.input
-        if self.usage is not None:
-            d["usage"] = self.usage
-        if self.cost is not None:
-            d["cost"] = self.cost
+        # Usage: auto-calculate total_tokens if possible
+        usage = self._auto_usage()
+        if usage:
+            d["usage"] = usage
+        # Cost: auto-calculate if not provided
+        model = self.input.get("model") if self.input and isinstance(self.input, dict) else self.model
+        d["cost"] = self._auto_cost(model, usage, self.cost)
         if self.metadata is not None:
             d["metadata"] = self.metadata
         if self.name is not None:
@@ -345,7 +373,7 @@ class CrashLensLogger:
                 f"{event.input_tokens}/{event.output_tokens}/{event.total_tokens}",
                 f"${event.cost:.6f}",
                 f"{event.latency_ms}ms",
-                str(event.retry_attempt) if event.retry_attempt > 0 else "-"
+                str(event.retry_count) if event.retry_count > 0 else "-"
             )
         
         if RICH_AVAILABLE:
@@ -508,7 +536,7 @@ def log(
             console.print(f"  Response: {event.response}")
             console.print(f"  Tokens: {event.input_tokens}/{event.output_tokens}/{event.total_tokens}")
             console.print(f"  Cost: ${event.cost:.6f}")
-            console.print(f"  Retry: {event.retry_attempt}")
+            console.print(f"  Retry: {event.retry_count}")
     else:
         # Write logs to file
         logger.write_logs(events, output)
