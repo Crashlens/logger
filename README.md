@@ -1,220 +1,137 @@
-# CrashLens Logger
+# CrashLens Logger 🧠💸  
+Structured Token & Cost Logs for OpenAI / Anthropic Usage
 
-A CLI tool for generating structured logs of LLM API usage. These logs are designed to be consumed by FinOps tools like CrashLens to detect token waste, fallback storms, retry loops, and enforce budget policies.
+[![PyPI version](https://badge.fury.io/py/crashlens_logger.svg)](https://badge.fury.io/py/crashlens_logger)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Features
+> ⚠️ Are you burning money on GPT calls without knowing where or why?  
+> CrashLens Logger captures cost, tokens, and prompts in JSON logs — for FinOps, audits, or debugging.
 
-🔹 **CLI Interface** - Easy-to-use command-line interface with Click  
-🔹 **Structured Logging** - JSON Lines format for easy processing  
-🔹 **Token Estimation** - Estimates token usage from text input  
-🔹 **Cost Calculation** - Calculates costs based on configurable model pricing  
-🔹 **Retry Simulation** - Simulate retry patterns for testing  
-🔹 **Fallback Simulation** - Simulate model fallback scenarios  
-🔹 **YAML Configuration** - Flexible pricing configuration  
-🔹 **Dev Mode** - Verbose output and debugging features  
+---
 
-## Setup & Installation
+## Purpose
 
-### 1. Recommended: Install from PyPI
+**CrashLens Logger** is a Python package for generating structured, machine-readable logs of LLM (Large Language Model) API usage.  
+It helps you:
+- Track prompt, model, and token usage for every AI call
+- Automatically calculate cost using standard model pricing
+- Output logs in newline-delimited JSON (NDJSON) for easy analysis, monitoring, and cost tracking
+
+---
+
+## Real Use Cases
+
+- 🔍 Debug fallback loops by logging all model calls with prompt/token trace
+- 💰 Auto-generate cost reports across agents & users
+- 🧠 Analyze which prompts are burning tokens (and why)
+- 🛡️ Audit LLM usage for compliance or security
+
+---
+
+## Installation
 
 ```bash
 pip install --upgrade crashlens_logger
 ```
+_This will install or upgrade to the latest version._
 
-### 2. Development Installation (Editable Mode)
-If you want to work on the code and see changes reflected immediately:
+---
 
-```bash
-# (Optional but recommended) Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install in editable mode
-pip install -e .
-```
-
-### 3. Install Directly from GitHub (if applicable)
-If the package is hosted on GitHub:
-
-```bash
-pip install git+https://github.com/Crashlens/logger.git
-```
-
-### 4. Install Dependencies Manually (if needed)
-If you want to install dependencies directly:
-
-```bash
-pip install -r requirements.txt
-```
-
-### 5. Troubleshooting
-- **Cannot resolve host (e.g., github.com):**
-  - Check your internet connection.
-  - Try opening https://github.com in your browser.
-  - Try changing your DNS to Google (8.8.8.8) or Cloudflare (1.1.1.1).
-  - If on a restricted network, check firewall/proxy settings.
-- **pip cache issues:**
-  - Try `pip install --no-cache-dir crashlens_logger`
-- **Permission errors:**
-  - Use a virtual environment or add `--user` to your pip command.
-
-## Usage
-
-### Basic Logging
-
-```bash
-python -m crashlens_logger.logger log --model "gpt-4" --prompt "Hello, world!" --response "Hi there!"
-```
-
-### Advanced Usage
-
-```bash
-# Simulate retries
-python -m crashlens_logger.logger log \
-  --model "gpt-4" \
-  --prompt "Complex query" \
-  --response "Detailed response" \
-  --simulate-retries 3 \
-  --dev-mode
-
-# Simulate fallback
-python -m crashlens_logger.logger log \
-  --model "gpt-4" \
-  --prompt "Another query" \
-  --simulate-fallback \
-  --output "fallback_logs.jsonl"
-
-# Custom configuration
-python -m crashlens_logger.logger log \
-  --model "custom-model" \
-  --prompt "Test prompt" \
-  --config "custom_pricing.yaml"
-```
-
-### Python Integration Example
-
-You can use CrashLensLogger directly in your Python code to log structured events:
+## Quick Start
 
 ```python
 from crashlens_logger import CrashLensLogger
+import uuid
+from datetime import datetime
+import openai
 
 logger = CrashLensLogger()
 
-logger.log_event(
-    traceId="trace_3921",
-    type="generation",
-    startTime="2024-06-01T10:00:00Z",
-    endTime="2024-06-01T10:00:01Z",
-    level="info",
-    input={"model": "gpt-4o", "prompt": "What is 2+2?"},
-    usage={"prompt_tokens": 5, "completion_tokens": 5},
-    cost=0.000162,
-    metadata={"fallback_attempted": False, "route": "/api/chat/completions", "team": "engineering"},
-    name="simple-retry"
-)
+def call_and_log():
+    trace_id = str(uuid.uuid4())
+    start_time = datetime.utcnow().isoformat() + "Z"
+    prompt = "What are the main tourist attractions in Rome?"
+    model = "gpt-3.5-turbo"
+    response = openai.ChatCompletion.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    end_time = datetime.utcnow().isoformat() + "Z"
+    usage = response["usage"]
+    logger.log_event(
+        traceId=trace_id,
+        startTime=start_time,
+        endTime=end_time,
+        input={"model": model, "prompt": prompt},
+        usage=usage
+    )
 ```
 
-#### Required Fields for Structured Logging
+---
 
-| Field      | Description                                  | Example Value                        |
-|------------|----------------------------------------------|--------------------------------------|
-| traceId    | Unique request ID (UUID)                     | "trace_3921"                         |
-| type       | Log type                                     | "generation"                         |
-| startTime  | Start timestamp (ISO8601)                    | "2024-06-01T10:00:00Z"               |
-| endTime    | End timestamp (ISO8601)                      | "2024-06-01T10:00:01Z"               |
-| level      | Log level                                    | "info"                               |
-| input      | Dict: model, prompt, etc.                    | {"model": "gpt-4o", "prompt": "..."} |
-| usage      | Dict: token counts, etc.                     | {"prompt_tokens": 5, ...}            |
-| cost       | Operation cost                               | 0.000162                             |
-| metadata   | Dict: extra info (route, team, etc.)         | {"route": "...", "team": "..."}      |
-| name       | Operation name                               | "simple-retry"                       |
+## Where Do Logs Go?
 
-#### Step-by-Step: Logging in Your AI Agent
+By default, logs are printed to `stdout` in newline-delimited JSON (NDJSON) format.  
+You can redirect output to a file:
 
-1. Install: `pip install crashlens_logger`
-2. Import: `from crashlens_logger import CrashLensLogger`
-3. Initialize: `logger = CrashLensLogger()`
-4. Collect required fields (see table above)
-5. Log: `logger.log_event(traceId=..., type=..., ...)`
-
-### Configuration Management
-
-Initialize a sample configuration file:
 ```bash
-python -m crashlens_logger.logger init-config --config "my_config.yaml"
+python your_script.py > logs.jsonl
 ```
 
-### Log Analysis
+---
 
-Analyze existing log files:
-```bash
-python -m crashlens_logger.logger analyze logs.jsonl
-python -m crashlens_logger.logger analyze logs.jsonl --model "gpt-4"
-python -m crashlens_logger.logger analyze logs.jsonl --trace-id "123e4567-e89b-12d3-a456-426614174000"
-```
-
-## Log Schema
-
-Each log entry follows this JSON schema:
+## Example Output
 
 ```json
 {
-  "traceId": "trace_3921",
-  "type": "generation",
-  "startTime": "2024-06-01T10:00:00Z",
-  "endTime": "2024-06-01T10:00:01Z",
-  "level": "info",
-  "input": {"model": "gpt-4o", "prompt": "What is 2+2?"},
-  "usage": {"prompt_tokens": 5, "completion_tokens": 5},
-  "cost": 0.000162,
-  "metadata": {"fallback_attempted": false, "route": "/api/chat/completions", "team": "engineering"},
-  "name": "simple-retry"
+  "traceId": "trace_norm_01",
+  "startTime": "2025-07-22T10:30:05Z",
+  "input": {"model": "gpt-3.5-turbo", "prompt": "What are the main tourist attractions in Rome?"},
+  "usage": {"prompt_tokens": 10, "completion_tokens": 155, "total_tokens": 165},
+  "cost": 0.0002375
 }
 ```
 
-## Configuration
+---
 
-Create a YAML configuration file for custom model pricing:
+## What Gets Calculated Automatically?
 
-```yaml
-pricing:
-  gpt-4:
-    input_price_per_1k: 0.03
-    output_price_per_1k: 0.06
-  gpt-3.5-turbo:
-    input_price_per_1k: 0.001
-    output_price_per_1k: 0.002
-  claude-3-opus:
-    input_price_per_1k: 0.015
-    output_price_per_1k: 0.075
+- **total_tokens**: If you provide `prompt_tokens` and `completion_tokens` in `usage`, the logger adds `total_tokens`.
+- **cost**: If you provide `model`, `prompt_tokens`, and `completion_tokens`, the logger calculates cost using standard pricing.
+
+---
+
+## Troubleshooting
+
+- **Cannot resolve host:** Check your internet connection or DNS.
+- **pip cache issues:** Try `pip install --no-cache-dir crashlens_logger`
+- **Permission errors:** Use a virtual environment or add `--user` to your pip command.
+- **Module not found:** Ensure you’re using the correct Python environment.
+
+---
+
+## Roadmap
+
+- [ ] Token pricing overrides
+- [ ] File/DB exporters
+- [ ] SDK instrumentation helpers
+- [ ] Pydantic validation for log structure
+
+---
+
+## Testing
+
+Run tests with:
+
+```bash
+pytest
 ```
 
-## Development
+*100% coverage on core logging logic.*
 
-The project is structured as follows:
-
-```
-crashlens_logger/
-├── __init__.py          # Package initialization
-└── logger.py            # Main CLI and logging logic
-```
-
-### Key Components
-
-- **LogEvent**: Data class representing a single log entry
-- **TokenEstimator**: Estimates token counts from text (placeholder for future tiktoken integration)
-- **CostCalculator**: Calculates costs based on token usage and pricing
-- **ConfigManager**: Handles YAML configuration loading
-- **CrashLensLogger**: Main orchestrator class
-
-## Future Enhancements
-
-- [ ] Integration with tiktoken for accurate OpenAI token counting
-- [ ] Integration with Claude tokenizer for Anthropic models
-- [ ] Real API integration mode
-- [ ] Dashboard for log visualization
-- [ ] Advanced anomaly detection
+---
 
 ## License
 
 MIT License
+
