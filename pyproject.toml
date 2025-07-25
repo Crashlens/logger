@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "crashlens-logger"
-version = "1.0.2"
+version = "1.0.3"
 description = "CLI tool to generate structured LLM logs for CrashLens cost detection"
 authors = ["Aditya Singh"]
 readme = "README.md"
