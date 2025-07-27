@@ -63,7 +63,8 @@ def call_and_log():
         startTime=start_time,
         endTime=end_time,
         input={"model": model, "prompt": prompt},
-        usage=usage
+        usage=usage,
+        output_file="logs.jsonl"  # <-- This will create/append to logs.jsonl
     )
 ```
 
@@ -71,12 +72,19 @@ def call_and_log():
 
 ## Where Do Logs Go?
 
-By default, logs are printed to `stdout` in newline-delimited JSON (NDJSON) format.  
-You can redirect output to a file:
+By default, logs are printed to `stdout` in newline-delimited JSON (NDJSON) format.
+
+If you provide the `output_file` parameter (recommended), logs will also be appended to that file (e.g., `logs.jsonl`).
+- If the file does not exist, it will be created automatically.
+- If the file exists, each new log will be appended as a new line.
+
+You can redirect output to a file as well:
 
 ```bash
 python your_script.py > logs.jsonl
 ```
+
+But using `output_file="logs.jsonl"` is the most robust and portable way to persist logs.
 
 ---
 
@@ -107,6 +115,7 @@ python your_script.py > logs.jsonl
 - **pip cache issues:** Try `pip install --no-cache-dir crashlens_logger`
 - **Permission errors:** Use a virtual environment or add `--user` to your pip command.
 - **Module not found:** Ensure you’re using the correct Python environment.
+- **File not created:** Make sure you are passing `output_file="logs.jsonl"` to `log_event` and that your process has write permissions.
 
 ---
 
@@ -134,4 +143,3 @@ pytest
 ## License
 
 MIT License
-

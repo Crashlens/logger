@@ -381,10 +381,25 @@ class CrashLensLogger:
         else:
             print(table)
 
-    def log_event(self, **fields):
-        """Log a structured event with arbitrary fields (prints JSON to stdout)."""
+    def log_event(self, output_file: str = None, **fields):
+        """
+        Log a structured event with arbitrary fields.
+        Prints JSON to stdout and appends to file if output_file is given.
+        """
         event = LogEvent(**fields)
-        print(event.to_json())
+        json_str = event.to_json()
+        print(json_str)  # Always print to stdout
+
+        # Write to file if output_file is specified
+        if output_file:
+            try:
+                with open(output_file, "a") as f:
+                    f.write(json_str + "\n")
+            except Exception as e:
+                try:
+                    console.print(f"[red]❌ Error writing log to file: {e}[/red]")
+                except Exception:
+                    print(f"Error writing log to file: {e}")
         return event
 
 
