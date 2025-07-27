@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="crashlens-logger",
-    version="1.0.2",
+    version="1.0.5",
     author="CrashLens Team",
     description="CLI tool for generating structured logs of LLM API usage",
     long_description=long_description,
