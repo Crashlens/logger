@@ -7,7 +7,6 @@ Structured Token & Cost Logs for OpenAI / Anthropic Usage
 > ⚠️ Are you burning money on GPT calls without knowing where or why?  
 > CrashLens Logger captures cost, tokens, and prompts in JSON logs — for FinOps, audits, or debugging.
 
-
 ---
 
 ## Purpose

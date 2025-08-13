@@ -8,67 +8,81 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 import click
 import orjson
 import yaml
 
+# Rich imports with fallback handling
+RICH_AVAILABLE = False
+RichConsole = None
+RichTable = None
+
 try:
-    from rich.console import Console
-    from rich.table import Table
+    from rich.console import Console as RichConsole
+    from rich.table import Table as RichTable  
     from rich import print as rprint
     RICH_AVAILABLE = True
 except ImportError:
-    RICH_AVAILABLE = False
-    # Fallback console for when rich is not available
-    class Console:
-        def print(self, *args, **kwargs):
-            # Remove rich markup for fallback
-            if args:
-                clean_args = []
-                for arg in args:
-                    if isinstance(arg, str):
-                        # Simple removal of rich markup like [color]text[/color]
-                        import re
-                        clean_arg = re.sub(r'\[/?[^\]]*\]', '', str(arg))
-                        clean_args.append(clean_arg)
-                    else:
-                        clean_args.append(arg)
-                print(*clean_args, **kwargs)
-            else:
-                print(*args, **kwargs)
-    
-    # Simple fallback table for when rich is not available
-    class Table:
-        def __init__(self, title=""):
-            self.title = title
-            self.columns = []
-            self.rows = []
-        
-        def add_column(self, name, **kwargs):
-            # Ignore rich-specific parameters like style, no_wrap, etc.
-            self.columns.append(name)
-        
-        def add_row(self, *values):
-            self.rows.append(values)
-        
-        def __str__(self):
-            if not self.rows:
-                return f"{self.title}\nNo data"
-            
-            result = f"{self.title}\n"
-            result += " | ".join(self.columns) + "\n"
-            result += "-" * (len(" | ".join(self.columns))) + "\n"
-            for row in self.rows:
-                result += " | ".join(str(cell) for cell in row) + "\n"
-            return result
-    
     def rprint(*args, **kwargs):
         print(*args)
 
-# Initialize console after the try/except block
-console = Console()
+# Fallback console for when rich is not available
+class FallbackConsole:
+    def print(self, *args, **kwargs):
+        # Remove rich markup for fallback
+        if args:
+            clean_args = []
+            for arg in args:
+                if isinstance(arg, str):
+                    # Simple removal of rich markup like [color]text[/color]
+                    import re
+                    clean_arg = re.sub(r'\[/?[^\]]*\]', '', str(arg))
+                    clean_args.append(clean_arg)
+                else:
+                    clean_args.append(arg)
+            print(*clean_args, **kwargs)
+        else:
+            print(*args, **kwargs)
+
+# Simple fallback table for when rich is not available
+class FallbackTable:
+    def __init__(self, title=""):
+        self.title = title
+        self.columns = []
+        self.rows = []
+    
+    def add_column(self, name, **kwargs):
+        # Ignore rich-specific parameters like style, no_wrap, etc.
+        self.columns.append(name)
+    
+    def add_row(self, *values):
+        self.rows.append(values)
+    
+    def __str__(self):
+        if not self.rows:
+            return f"{self.title}\nNo data"
+        
+        result = f"{self.title}\n"
+        result += " | ".join(self.columns) + "\n"
+        result += "-" * (len(" | ".join(self.columns))) + "\n"
+        for row in self.rows:
+            result += " | ".join(str(cell) for cell in row) + "\n"
+        return result
+
+# Initialize console and create factory functions
+def create_console():
+    if RICH_AVAILABLE and RichConsole:
+        return RichConsole()
+    return FallbackConsole()
+
+def create_table(title=""):
+    if RICH_AVAILABLE and RichTable:
+        return RichTable(title=title)
+    return FallbackTable(title=title)
+
+console = create_console()
 
 
 class LogEvent:
@@ -76,49 +90,66 @@ class LogEvent:
     
     def __init__(
         self,
-        trace_id: str = None,
-        type: str = None,
-        start_time: str = None,
-        end_time: str = None,
-        level: str = None,
-        input: dict = None,
-        usage: dict = None,
-        cost: float = None,
-        metadata: dict = None,
-        name: str = None,
+        trace_id: Optional[str] = None,
+        type: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        level: Optional[str] = None,
+        input: Optional[dict] = None,
+        usage: Optional[dict] = None,
+        cost: Optional[float] = None,
+        metadata: Optional[dict] = None,
+        name: Optional[str] = None,
         # legacy fields for backward compatibility
-        model: str = None,
-        prompt: str = None,
-        response: str = None,
-        input_tokens: int = None,
-        output_tokens: int = None,
-        latency_ms: int = None,
-        retry_count: int = None,
-        fallback_model: str = None,
+        model: Optional[str] = None,
+        prompt: Optional[str] = None,
+        response: Optional[str] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        latency_ms: Optional[int] = None,
+        retry_count: Optional[int] = None,
+        fallback_model: Optional[str] = None,
         **extra_fields
     ):
-        # Standard fields
-        self.traceId = trace_id or extra_fields.pop("traceId", None)
-        self.type = type or extra_fields.pop("type", None)
-        self.startTime = start_time or extra_fields.pop("startTime", None)
-        self.endTime = end_time or extra_fields.pop("endTime", None)
-        self.level = level or extra_fields.pop("level", None)
-        self.input = input or extra_fields.pop("input", None)
-        self.usage = usage or extra_fields.pop("usage", None)
+        # Standard fields - prefer explicit parameters over extra_fields
+        self.traceId = trace_id if trace_id is not None else extra_fields.pop("traceId", None)
+        self.type = type if type is not None else extra_fields.pop("type", None)
+        self.startTime = start_time if start_time is not None else extra_fields.pop("startTime", None)
+        self.endTime = end_time if end_time is not None else extra_fields.pop("endTime", None)
+        self.level = level if level is not None else extra_fields.pop("level", None)
+        self.input = input if input is not None else extra_fields.pop("input", None)
+        self.usage = usage if usage is not None else extra_fields.pop("usage", None)
         self.cost = cost if cost is not None else extra_fields.pop("cost", None)
-        self.metadata = metadata or extra_fields.pop("metadata", None)
-        self.name = name or extra_fields.pop("name", None)
+        self.metadata = metadata if metadata is not None else extra_fields.pop("metadata", None)
+        self.name = name if name is not None else extra_fields.pop("name", None)
+        
         # Legacy/compat fields
-        self.model = model
-        self.prompt = prompt
-        self.response = response
-        self.input_tokens = input_tokens
-        self.output_tokens = output_tokens
-        self.latency_ms = latency_ms
-        self.retry_count = retry_count
-        self.fallback_model = fallback_model
-        # Store any extra fields
+        self.model = model if model is not None else extra_fields.pop("model", None)
+        self.prompt = prompt if prompt is not None else extra_fields.pop("prompt", None)
+        self.response = response if response is not None else extra_fields.pop("response", None)
+        self.input_tokens = input_tokens if input_tokens is not None else extra_fields.pop("input_tokens", None)
+        self.output_tokens = output_tokens if output_tokens is not None else extra_fields.pop("output_tokens", None)
+        self.latency_ms = latency_ms if latency_ms is not None else extra_fields.pop("latency_ms", None)
+        self.retry_count = retry_count if retry_count is not None else extra_fields.pop("retry_count", None)
+        self.fallback_model = fallback_model if fallback_model is not None else extra_fields.pop("fallback_model", None)
+        
+        # Store any remaining extra fields
         self.extra_fields = extra_fields
+    
+    @property
+    def trace_id(self) -> Optional[str]:
+        """Alias for traceId for backward compatibility."""
+        return self.traceId
+    
+    @property
+    def total_tokens(self) -> Optional[int]:
+        """Calculate total tokens from input and output tokens."""
+        if self.input_tokens is not None and self.output_tokens is not None:
+            return self.input_tokens + self.output_tokens
+        # Try to get from usage dict
+        if self.usage:
+            return self.usage.get("total_tokens")
+        return None
 
     def _auto_usage(self):
         # Calculate total_tokens if possible
@@ -139,7 +170,6 @@ class LogEvent:
             ct = usage.get("completion_tokens")
             if pt is not None and ct is not None:
                 # Use default pricing if available
-                from .logger import ConfigManager, CostCalculator
                 pricing = ConfigManager.DEFAULT_PRICING
                 calc = CostCalculator(pricing)
                 return calc.calculate_cost(model, pt, ct)
@@ -346,7 +376,9 @@ class CrashLensLogger:
             
             # Print confirmation with details
             for event in events:
-                console.print(f"Logged: model={event.model}, traceId={event.trace_id[:8]}..., cost=${event.cost:.6f}")
+                trace_display = event.trace_id[:8] + "..." if event.trace_id else "None"
+                cost_display = f"${event.cost:.6f}" if event.cost is not None else "$0.000000"
+                console.print(f"Logged: model={event.model}, traceId={trace_display}, cost={cost_display}")
             
             if self.dev_mode:
                 self._print_events_table(events)
@@ -357,7 +389,7 @@ class CrashLensLogger:
     
     def _print_events_table(self, events: List[LogEvent]) -> None:
         """Print events in a nice table format for dev mode."""
-        table = Table(title="Generated Log Events")
+        table = create_table(title="Generated Log Events")
         
         table.add_column("Trace ID", style="cyan" if RICH_AVAILABLE else "", no_wrap=True)
         table.add_column("Model", style="magenta" if RICH_AVAILABLE else "")
@@ -367,13 +399,18 @@ class CrashLensLogger:
         table.add_column("Retry", style="red" if RICH_AVAILABLE else "")
         
         for event in events:
+            trace_display = event.trace_id[:8] + "..." if event.trace_id else "None"
+            cost_display = f"${event.cost:.6f}" if event.cost is not None else "$0.000000"
+            tokens_display = f"{event.input_tokens or 0}/{event.output_tokens or 0}/{event.total_tokens or 0}"
+            latency_display = f"{event.latency_ms or 0}ms"
+            retry_display = str(event.retry_count) if event.retry_count and event.retry_count > 0 else "-"
             table.add_row(
-                event.trace_id[:8] + "...",
-                event.model,
-                f"{event.input_tokens}/{event.output_tokens}/{event.total_tokens}",
-                f"${event.cost:.6f}",
-                f"{event.latency_ms}ms",
-                str(event.retry_count) if event.retry_count > 0 else "-"
+                trace_display,
+                event.model or "unknown",
+                tokens_display,
+                cost_display,
+                latency_display,
+                retry_display
             )
         
         if RICH_AVAILABLE:
@@ -381,7 +418,7 @@ class CrashLensLogger:
         else:
             print(table)
 
-    def log_event(self, output_file: str = None, **fields):
+    def log_event(self, output_file: Optional[str] = None, **fields):
         """
         Log a structured event with arbitrary fields.
         Prints JSON to stdout and appends to file if output_file is given.
@@ -633,7 +670,7 @@ def analyze(log_file: str, trace_id: Optional[str], model: Optional[str]):
         avg_latency = sum(e.get("latency_ms", 0) for e in events) / len(events)
         
         # Print analysis
-        table = Table(title=f"Log Analysis: {log_file}")
+        table = create_table(title=f"Log Analysis: {log_file}")
         table.add_column("Metric", style="cyan" if RICH_AVAILABLE else "")
         table.add_column("Value", style="green" if RICH_AVAILABLE else "")
         
