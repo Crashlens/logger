@@ -8,67 +8,81 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 import click
 import orjson
 import yaml
 
+# Rich imports with fallback handling
+RICH_AVAILABLE = False
+RichConsole = None
+RichTable = None
+
 try:
-    from rich.console import Console
-    from rich.table import Table
+    from rich.console import Console as RichConsole
+    from rich.table import Table as RichTable  
     from rich import print as rprint
     RICH_AVAILABLE = True
 except ImportError:
-    RICH_AVAILABLE = False
-    # Fallback console for when rich is not available
-    class Console:
-        def print(self, *args, **kwargs):
-            # Remove rich markup for fallback
-            if args:
-                clean_args = []
-                for arg in args:
-                    if isinstance(arg, str):
-                        # Simple removal of rich markup like [color]text[/color]
-                        import re
-                        clean_arg = re.sub(r'\[/?[^\]]*\]', '', str(arg))
-                        clean_args.append(clean_arg)
-                    else:
-                        clean_args.append(arg)
-                print(*clean_args, **kwargs)
-            else:
-                print(*args, **kwargs)
-    
-    # Simple fallback table for when rich is not available
-    class Table:
-        def __init__(self, title=""):
-            self.title = title
-            self.columns = []
-            self.rows = []
-        
-        def add_column(self, name, **kwargs):
-            # Ignore rich-specific parameters like style, no_wrap, etc.
-            self.columns.append(name)
-        
-        def add_row(self, *values):
-            self.rows.append(values)
-        
-        def __str__(self):
-            if not self.rows:
-                return f"{self.title}\nNo data"
-            
-            result = f"{self.title}\n"
-            result += " | ".join(self.columns) + "\n"
-            result += "-" * (len(" | ".join(self.columns))) + "\n"
-            for row in self.rows:
-                result += " | ".join(str(cell) for cell in row) + "\n"
-            return result
-    
     def rprint(*args, **kwargs):
         print(*args)
 
-# Initialize console after the try/except block
-console = Console()
+# Fallback console for when rich is not available
+class FallbackConsole:
+    def print(self, *args, **kwargs):
+        # Remove rich markup for fallback
+        if args:
+            clean_args = []
+            for arg in args:
+                if isinstance(arg, str):
+                    # Simple removal of rich markup like [color]text[/color]
+                    import re
+                    clean_arg = re.sub(r'\[/?[^\]]*\]', '', str(arg))
+                    clean_args.append(clean_arg)
+                else:
+                    clean_args.append(arg)
+            print(*clean_args, **kwargs)
+        else:
+            print(*args, **kwargs)
+
+# Simple fallback table for when rich is not available
+class FallbackTable:
+    def __init__(self, title=""):
+        self.title = title
+        self.columns = []
+        self.rows = []
+    
+    def add_column(self, name, **kwargs):
+        # Ignore rich-specific parameters like style, no_wrap, etc.
+        self.columns.append(name)
+    
+    def add_row(self, *values):
+        self.rows.append(values)
+    
+    def __str__(self):
+        if not self.rows:
+            return f"{self.title}\nNo data"
+        
+        result = f"{self.title}\n"
+        result += " | ".join(self.columns) + "\n"
+        result += "-" * (len(" | ".join(self.columns))) + "\n"
+        for row in self.rows:
+            result += " | ".join(str(cell) for cell in row) + "\n"
+        return result
+
+# Initialize console and create factory functions
+def create_console():
+    if RICH_AVAILABLE and RichConsole:
+        return RichConsole()
+    return FallbackConsole()
+
+def create_table(title=""):
+    if RICH_AVAILABLE and RichTable:
+        return RichTable(title=title)
+    return FallbackTable(title=title)
+
+console = create_console()
 
 
 class LogEvent:
@@ -375,7 +389,7 @@ class CrashLensLogger:
     
     def _print_events_table(self, events: List[LogEvent]) -> None:
         """Print events in a nice table format for dev mode."""
-        table = Table(title="Generated Log Events")
+        table = create_table(title="Generated Log Events")
         
         table.add_column("Trace ID", style="cyan" if RICH_AVAILABLE else "", no_wrap=True)
         table.add_column("Model", style="magenta" if RICH_AVAILABLE else "")
@@ -656,7 +670,7 @@ def analyze(log_file: str, trace_id: Optional[str], model: Optional[str]):
         avg_latency = sum(e.get("latency_ms", 0) for e in events) / len(events)
         
         # Print analysis
-        table = Table(title=f"Log Analysis: {log_file}")
+        table = create_table(title=f"Log Analysis: {log_file}")
         table.add_column("Metric", style="cyan" if RICH_AVAILABLE else "")
         table.add_column("Value", style="green" if RICH_AVAILABLE else "")
         
